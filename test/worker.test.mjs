@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import worker,{handleTool,QlooBudget,boundedResponse} from '../src/worker.mjs';
+const MAX_QLOO_BYTES=2097152;
 const movie='b7f09b1e-dd1c-4a40-86a9-5acfd8876967';
 const resultMovie={entity_id:'9b4225b9-feda-4c9f-b782-012345678900',name:'Synthetic upstream test film',subtype:'urn:entity:movie'};
 const envLive=()=>({QLOO_LIVE_ENABLED:'true',QLOO_STOP:'false',QLOO_TOTAL_REQUEST_LIMIT:'1',QLOO_EXPIRES_AT:new Date(Date.now()+3600000).toISOString(),QLOO_API_KEY:'synthetic-test-only'});
@@ -101,7 +102,7 @@ test('Ledger unknown transport failure consumes reservation and discloses no dia
   const response=await instance.fetch(ledgerRequest());assert.equal(response.status,503);assert.equal((await response.text()).includes('synthetic-private-diagnostic'),false);assert.equal(data.get('pending'),true);
 });
 test('Ledger rejects oversize upstream response without returning its contents',async()=>{
-  const {instance}=ledger({...envLive(),__testFetch:async()=>new Response('x'.repeat(262145))});assert.equal((await instance.fetch(ledgerRequest())).status,503);
+  const {instance}=ledger({...envLive(),__testFetch:async()=>new Response('x'.repeat(MAX_QLOO_BYTES+1))});assert.equal((await instance.fetch(ledgerRequest())).status,503);
 });
 test('Ledger accepts genuine empty results, empty error fields and movie type fallback',async()=>{
   for(const body of [{success:true,errors:[],error:null,results:[]},{success:true,error:{},results:[{entity_id:resultMovie.entity_id,name:resultMovie.name,type:'urn:entity:movie'}]}]){
@@ -116,7 +117,7 @@ test('Worker asset fallback does not expose server source itself',async()=>{
 test('read-only budget status preserves consumed state and never invokes fetch',async()=>{
   let calls=0;const initial={used:1,pending:true,stopped:true};const {instance,data}=ledger({...envLive(),__testFetch:async()=>{calls++;return upstream();}},initial);
   const response=await instance.fetch(new Request('https://ledger.internal/read-only-status'));const result=await response.json();
-  assert.equal(response.status,200);assert.deepEqual(result,{grantProtocolVersion:4,grantConfiguration:{protocolVersion:4,id:null,expiresAt:null,enabled:false},used:1,pending:true,stopped:true,maximumQlooRequests:1,additionalQlooAllowed:false,httpStatus:null});assert.equal(calls,0);assert.deepEqual(Object.fromEntries(data),initial);
+  assert.equal(response.status,200);assert.deepEqual(result,{grantProtocolVersion:5,grantConfiguration:{protocolVersion:5,id:null,expiresAt:null,enabled:false},used:1,pending:true,stopped:true,maximumQlooRequests:1,additionalQlooAllowed:false,httpStatus:null});assert.equal(calls,0);assert.deepEqual(Object.fromEntries(data),initial);
 });
 test('public budget route calls only the stable ledger read path',async()=>{
   let target;const env={QLOO_BUDGET:{idFromName(name){assert.equal(name,'qloo-lifetime-v1');return name;},get(){return {async fetch(url){target=url;return new Response(JSON.stringify({used:1,stopped:true,additionalQlooAllowed:false}));}};}}};
@@ -135,7 +136,7 @@ test('earlier success summary projection is accepted without claiming a raw repl
 const diagnosticCases=[
  ['http',()=>new Response('never copied',{status:401})],
  ['empty_body',()=>new Response(null)],
- ['body_limit',()=>new Response('x'.repeat(262145))],
+ ['body_limit',()=>new Response('x'.repeat(MAX_QLOO_BYTES+1))],
  ['body_read',()=>new Response(new ReadableStream({start(c){c.error(new Error('fake-diagnostic-key must not leak'));}}))],
  ['json_decode',()=>new Response('{fake-diagnostic-key')],
  ['success_flag',()=>new Response(JSON.stringify({success:false,results:[]}))],
@@ -150,6 +151,16 @@ const diagnosticCases=[
 ];
 for(const [stage,build]of diagnosticCases)test(`safe diagnostics identify ${stage} with no raw values`,async()=>{
   await assert.rejects(boundedResponse(build(),'fake-diagnostic-key'),error=>{
-    assert.equal(error.validation.stage,stage);const serialized=JSON.stringify({message:error.message,validation:error.validation});assert.equal(serialized.includes('fake-diagnostic-key'),false);assert.equal(serialized.includes('unsafe'),false);assert.ok(error.validation.bytesRead<=262145);return true;
+    assert.equal(error.validation.stage,stage);const serialized=JSON.stringify({message:error.message,validation:error.validation});assert.equal(serialized.includes('fake-diagnostic-key'),false);assert.equal(serialized.includes('unsafe'),false);assert.ok(error.validation.bytesRead<=MAX_QLOO_BYTES+1);return true;
   });
+});
+test('bounded response accepts exactly 2MiB and rejects one byte above',async()=>{
+ const body=JSON.stringify({success:true,results:{entities:[resultMovie]}});const exact=body+' '.repeat(MAX_QLOO_BYTES-new TextEncoder().encode(body).length);
+ const accepted=await boundedResponse(new Response(exact),'fake-only');assert.equal(accepted.validation.bytesRead,MAX_QLOO_BYTES);assert.equal(accepted.list.length,1);
+ await assert.rejects(boundedResponse(new Response(exact+' '),'fake-only'),e=>e.validation.stage==='body_limit'&&e.validation.bytesRead===MAX_QLOO_BYTES+1);
+ await assert.rejects(boundedResponse(new Response('x'.repeat(MAX_QLOO_BYTES)),'fake-only'),e=>e.validation.stage==='json_decode');
+});
+test('stalled response stream obeys an overall deadline without retry',async()=>{
+ let cancelled=false;const body=new ReadableStream({pull(){return new Promise(()=>{})},cancel(){cancelled=true}});
+ await assert.rejects(boundedResponse(new Response(body),'fake-only',{deadlineAt:Date.now()+10}),e=>e.validation.stage==='body_timeout');assert.equal(cancelled,true);
 });

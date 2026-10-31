@@ -7,4 +7,4 @@ export async function verifyGrant(request,env){
   let diff=0;new Uint8Array(bytes).forEach((x,i)=>{diff|=x^expected[i];});return diff===0;
 }
 
-export function grantConfiguration(env){return {protocolVersion:4,id:env.QLOO_GRANT_ID??null,expiresAt:env.QLOO_GRANT_EXPIRES_AT??null,enabled:env.QLOO_GRANT_STOP==='false'&&/^[0-9a-f]{64}$/.test(env.QLOO_GRANT_HASH??'')&&Date.parse(env.QLOO_GRANT_EXPIRES_AT)>Date.now()&&!!env.QLOO_API_KEY};}
+export function grantConfiguration(env){return {protocolVersion:5,id:env.QLOO_GRANT_ID??null,expiresAt:env.QLOO_GRANT_EXPIRES_AT??null,enabled:env.QLOO_GRANT_STOP==='false'&&/^[0-9a-f]{64}$/.test(env.QLOO_GRANT_HASH??'')&&Date.parse(env.QLOO_GRANT_EXPIRES_AT)>Date.now()&&!!env.QLOO_API_KEY};}

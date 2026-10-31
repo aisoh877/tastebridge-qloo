@@ -4,6 +4,8 @@ import {toolDefinitions} from './tools.mjs';
 import {verifyOperator,operatorReady} from './operator.mjs';
 import {verifyGrant,grantConfiguration} from './grant.mjs';
 
+const MAX_QLOO_BYTES=2097152;
+const QLOO_TIMEOUT_MS=8000;
 const MOVIE=Object.freeze({id:'b7f09b1e-dd1c-4a40-86a9-5acfd8876967',name:'Inglourious Basterds'});
 const invented=['The Quiet Harbor','Orbit Letters','The Forest Kitchen','Orbit Letters (another invented film)'];
 const syntheticId=n=>`00000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
@@ -108,16 +110,16 @@ export default {async fetch(request,env){
   }catch(error){return json(error.code==='SIZE'?413:error.code==='LIVE_DISABLED'?503:error.code==='LOCAL_BUDGET'?429:400,{error:error.message,code:error.code??'INPUT'});}
 }};
 
-export async function boundedResponse(response,sensitiveValue){
+export async function boundedResponse(response,sensitiveValue,{deadlineAt=Date.now()+QLOO_TIMEOUT_MS}={}){
   // Only fixed enums, bounded counts and HTTP status may leave this validator.
   // Never retain raw upstream body, headers, field values, credentials or exceptions.
-  const validation={version:1,stage:'http',httpStatus:response.status,bytesRead:0};
+  const validation={version:1,stage:'http',httpStatus:response.status,bytesRead:0,maximumBytes:MAX_QLOO_BYTES};
   const reject=(stage,code='QLOO_CONTRACT')=>{throw Object.assign(fail(code,'Qloo response rejected; no retry.'),{validation:{...validation,stage}});};
   if(response.status!==200)reject('http',response.status===401||response.status===403?'QLOO_AUTH':response.status===429?'QLOO_RATE_LIMIT':'QLOO_FAILURE');
   const reader=response.body?.getReader();if(!reader)reject('empty_body');
   let size=0;const chunks=[];
   try{
-    while(true){const {done,value}=await reader.read();if(done)break;size+=value.byteLength;validation.bytesRead=Math.min(size,262145);if(size>262144){try{await reader.cancel();}catch{}reject('body_limit');}chunks.push(value);}
+    while(true){let timer;const remaining=deadlineAt-Date.now();if(remaining<=0)reject('body_timeout');let part;try{part=await Promise.race([reader.read(),new Promise((_,rejectTimeout)=>{timer=setTimeout(()=>rejectTimeout(Object.assign(new Error('deadline'),{timedOut:true})),remaining);})]);}catch(error){if(error.timedOut){void reader.cancel().catch(()=>{});reject('body_timeout');}throw error;}finally{clearTimeout(timer);}const {done,value}=part;if(done)break;size+=value.byteLength;validation.bytesRead=Math.min(size,MAX_QLOO_BYTES+1);if(size>MAX_QLOO_BYTES){try{void reader.cancel().catch(()=>{});}catch{}reject('body_limit');}chunks.push(value);}
   }catch(error){if(error.validation)throw error;reject('body_read');}
   const bytes=new Uint8Array(size);let offset=0;for(const chunk of chunks){bytes.set(chunk,offset);offset+=chunk.length;}
   let body;try{body=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(bytes));}catch{reject('json_decode');}
@@ -154,8 +156,8 @@ export class QlooBudget {
       if(request.method==='GET'&&path==='/read-only-status'){
         const used=(await this.ctx.storage.get('used'))??0,pending=(await this.ctx.storage.get('pending'))??false,stopped=(await this.ctx.storage.get('stopped'))??false;
         if(!Number.isInteger(used)||used<0||typeof pending!=='boolean'||typeof stopped!=='boolean')return json(503,{error:'Budget state unavailable.'});
-        const grant=(await this.ctx.storage.get('additional-grant'))??null,diagnosticGrant=(await this.ctx.storage.get('diagnostic-grant'))??null;
-        return json(200,{grantProtocolVersion:4,grantConfiguration:grantConfiguration(this.env),used,pending,stopped,...(grant?{grant,cumulativeUsed:used+grant.used+(diagnosticGrant?.used??0)}:{}),...(diagnosticGrant?{diagnosticGrant}:{}),maximumQlooRequests:1,additionalQlooAllowed:used<1&&!pending&&!stopped&&(liveReady(this.env)||operatorReady(this.env)),httpStatus:(await this.ctx.storage.get('last-http-status'))??null});
+        const grant=(await this.ctx.storage.get('additional-grant'))??null,diagnosticGrant=(await this.ctx.storage.get('diagnostic-grant'))??null,sizedGrant=(await this.ctx.storage.get('sized-grant'))??null;
+        return json(200,{grantProtocolVersion:5,grantConfiguration:grantConfiguration(this.env),used,pending,stopped,...(grant?{grant,cumulativeUsed:used+grant.used+(diagnosticGrant?.used??0)+(sizedGrant?.used??0)}:{}),...(diagnosticGrant?{diagnosticGrant}:{}),...(sizedGrant?{sizedGrant}:{}),maximumQlooRequests:1,additionalQlooAllowed:used<1&&!pending&&!stopped&&(liveReady(this.env)||operatorReady(this.env)),httpStatus:(await this.ctx.storage.get('last-http-status'))??null});
       }
       if(path==='/grant/once'){
         if(!await verifyGrant(request,this.env))return json(403,{code:'GRANT_DENIED'});
@@ -164,7 +166,10 @@ export class QlooBudget {
         // Preserve the old consumed/uncertain ledger. This is one separately approved grant.
         if((await this.ctx.storage.get('used'))!==1||(await this.ctx.storage.get('stopped'))!==true)return json(503,{code:'PRIOR_STATE_CHANGED'});
         const previousGrant=await this.ctx.storage.get('additional-grant');
-        const storageKey=previousGrant?'diagnostic-grant':'additional-grant';
+        const previousDiagnostic=await this.ctx.storage.get('diagnostic-grant');
+        if(previousDiagnostic&&!previousGrant)return json(503,{code:'PRIOR_STATE_CHANGED'});
+        const storageKey=previousDiagnostic?'sized-grant':previousGrant?'diagnostic-grant':'additional-grant';
+        if(previousDiagnostic&&(previousDiagnostic.id===input.grantId||previousDiagnostic.used!==1||previousDiagnostic.stopped!==true))return json(429,{code:'GRANT_CONSUMED'});
         if(previousGrant&&(previousGrant.id===input.grantId||previousGrant.used!==1||previousGrant.stopped!==true))return json(429,{code:'GRANT_CONSUMED'});
         if(await this.ctx.storage.get(storageKey))return json(429,{code:'GRANT_CONSUMED'});
         const grant={id:input.grantId,used:1,pending:true,stopped:true,additionalQlooAllowed:false,httpStatus:null,startedAt:new Date().toISOString()};
@@ -172,9 +177,10 @@ export class QlooBudget {
         try{
           const endpoint=new URL('https://hackathon.api.qloo.com/v2/insights');
           endpoint.searchParams.set('filter.type','urn:entity:movie');endpoint.searchParams.set('signal.interests.entities',MOVIE.id);endpoint.searchParams.set('take','10');
-          const response=await this.fetchImpl.call(globalThis,endpoint,{method:'GET',headers:{Accept:'application/json','X-Api-Key':this.env.QLOO_API_KEY},redirect:'manual',signal:AbortSignal.timeout(8000)});
+          const deadlineAt=Date.now()+QLOO_TIMEOUT_MS;
+          const response=await this.fetchImpl.call(globalThis,endpoint,{method:'GET',headers:{Accept:'application/json','X-Api-Key':this.env.QLOO_API_KEY},redirect:'manual',signal:AbortSignal.timeout(QLOO_TIMEOUT_MS)});
           grant.httpStatus=response.status;await this.ctx.storage.put(storageKey,grant);
-          const {list,validation}=await boundedResponse(response,this.env.QLOO_API_KEY);
+          const {list,validation}=await boundedResponse(response,this.env.QLOO_API_KEY,{deadlineAt});
           Object.assign(grant,{validation});
           Object.assign(grant,{pending:false,jsonValidated:true,movieCount:list.length,finishedAt:new Date().toISOString()});
           await this.ctx.storage.put(storageKey,grant);
@@ -205,9 +211,10 @@ export class QlooBudget {
       try{
         const endpoint=new URL('https://hackathon.api.qloo.com/v2/insights');
         endpoint.searchParams.set('filter.type','urn:entity:movie');endpoint.searchParams.set('signal.interests.entities',MOVIE.id);endpoint.searchParams.set('take','10');
-        const response=await this.fetchImpl.call(globalThis,endpoint,{method:'GET',headers:{Accept:'application/json','X-Api-Key':this.env.QLOO_API_KEY},redirect:'manual',signal:AbortSignal.timeout(8000)});
+        const deadlineAt=Date.now()+QLOO_TIMEOUT_MS;
+          const response=await this.fetchImpl.call(globalThis,endpoint,{method:'GET',headers:{Accept:'application/json','X-Api-Key':this.env.QLOO_API_KEY},redirect:'manual',signal:AbortSignal.timeout(QLOO_TIMEOUT_MS)});
         await this.ctx.storage.put('last-http-status',response.status);
-        const {list,validation}=await boundedResponse(response,this.env.QLOO_API_KEY);await this.ctx.storage.put('last-validation',validation);await this.ctx.storage.put({'sample-list':list,pending:false,'finished-at':new Date().toISOString(),...(operator?{stopped:true}:{})});return json(200,{list,reused:false,httpStatus:response.status,requestAttempts:1,stopped:operator});
+        const {list,validation}=await boundedResponse(response,this.env.QLOO_API_KEY,{deadlineAt});await this.ctx.storage.put('last-validation',validation);await this.ctx.storage.put({'sample-list':list,pending:false,'finished-at':new Date().toISOString(),...(operator?{stopped:true}:{})});return json(200,{list,reused:false,httpStatus:response.status,requestAttempts:1,stopped:operator});
       }catch(error){
         await this.ctx.storage.put('stopped',true);
         if(error.validation)await this.ctx.storage.put('last-validation',error.validation);
