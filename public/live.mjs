@@ -81,4 +81,22 @@ export async function mountLiveWorkflow(document,fetchImpl=fetch) {
   };
   await readiness();
 }
+
+if(typeof document!=='undefined'){
+  const button=document.querySelector('#show-verified'),output=document.querySelector('#verified-movies'),status=document.querySelector('#verified-status');
+  button.addEventListener('click',async()=>{
+    button.disabled=true;output.replaceChildren();status.textContent='Loading the stored result. No Qloo request.';
+    try{
+      const response=await fetch('/api/verified-sample',{signal:AbortSignal.timeout(8000)});
+      if(!response.ok)throw new Error();
+      const sample=await response.json();
+      if(sample.kind!=='recorded-worker-response'||sample.seed?.id!=='b7f09b1e-dd1c-4a40-86a9-5acfd8876967'||sample.jsonValidated!==true||sample.success!==true||!Array.isArray(sample.movies)||sample.movies.length!==10||sample.movies.some(x=>typeof x.name!=='string'||x.name.length>300))throw new Error();
+      for(const movie of sample.movies){const item=document.createElement('li');item.textContent=movie.name;output.append(item);}
+      status.textContent='Replay of previously retrieved real API results: 10 movies. No new Qloo request; not live or individually personalized.';
+      button.textContent='Replay stored results again';
+    }catch{status.textContent='Stored result could not be loaded. No automatic retry and no Qloo request.';}
+    finally{button.disabled=false;}
+  });
+  button.disabled=false;
+}
 if(typeof document!=='undefined')await mountLiveWorkflow(document);

@@ -10,7 +10,7 @@ https://tastebridge-demo.yagi-5e3.workers.dev
 
 A standalone Insights request obtained that movie on October 30, 2026. A separately approved Worker request on October 31 at 01:20 UTC then succeeded: HTTP 200, valid JSON, success=true and ten validated movie records. Its 443,671-byte response fit the repaired finite 2 MiB cap and total 8-second deadline. Earlier 256 KiB-limited requests had stopped before valid movie extraction. The original reservation and three distinct one-use grant reservations are consumed and stopped, cumulative 4. No automatic retry occurred.
 
-This verifies the fixed public-film Worker transport only. It does not verify independent three-person tastes or the public UI's live workflow. The current browser demo still shows the explicitly labeled older synthetic/replay examples. The ten-movie response has not been added to the public UI.
+This verifies the fixed public-film Worker transport only. It does not verify independent three-person tastes or the public UI's live workflow. The browser demo now provides a separate ten-movie recorded-result replay alongside the older synthetic/replay examples. It makes zero new Qloo requests and is not a new or individually personalized recommendation. Click “Show recorded results” on /live.
 
 The QLOO_API_KEY Secret exists server-side and is absent from source and browser assets. Public live access is disabled, the public send cap is zero and the original deadline remains expired. The one-use capability was disabled and its hash removed. This public fixture/replay demo is not established as meeting the contest's functional-Qloo requirement. Source publication to https://github.com/aisoh877/tastebridge-qloo is owner-approved. Contest submission remains unapproved and has not occurred.
 
@@ -36,7 +36,7 @@ A stable SQLite Durable Object serializes and durably reserves requests before s
 
 ## Verification and limits
 
-The deployed diagnostic/readiness lane passed 58/58 Worker tests, 3 local workerd mock cases and 4 execution-runner mock cases. Public HTTP regression and earlier desktop/mobile browser checks cover the fixture/replay UI. Production CPU time and Qloo pricing/quota are unmeasured; response latency does not establish CPU usage. The owner confirmed Workers Free. No plan upgrade, charge, new OAuth grant or contest submission was performed.
+The response/replay edition passed 59/59 Worker tests, 3 local workerd mock cases and 4 execution-runner mock cases. Public HTTP regression passed 21 cases. Actual Chromium desktop/mobile verification passed 16 checks including delayed readiness, duplicate-free replay, network failure/manual recovery, existing invented comparison and fixture error recovery. No JavaScript errors, Qloo requests or operator/grant calls were observed. Production CPU time and Qloo pricing/quota are unmeasured; response latency does not establish CPU usage. The owner confirmed Workers Free. No plan upgrade, charge, new OAuth grant or contest submission was performed.
 
 See DEPLOYMENT.md for deployed state and SUBMISSION.md for the English entry draft and remaining requirements.
 
@@ -45,3 +45,9 @@ See DEPLOYMENT.md for deployed state and SUBMISSION.md for the English entry dra
 The official `results.entities` hierarchy with `type=urn:entity` and `subtype=urn:entity:movie` was already supported. Both the old and repaired validators accept a documented-field projection and a projection of the earlier verified summary. Neither is a captured HTTP response, and these checks do not establish the cause of the later failed response.
 
 The diagnostic validator retains only fixed validation-stage enums, bounded byte/row counts, HTTP status, success/error flags and envelope kind. It never retains raw bodies, upstream field values, credential headers or raw exceptions. It distinguishes body limit/read, JSON decode, success/error, envelope, count, movie ID/type/title and credential-reflection failures. Failures still consume the reservation and stop. Readiness protocol 5 distinguishes this code and confirms matching grant configuration on the Worker and ledger before a send. The latest approved size-repair grant was then consumed once and disabled; previous ledger entries were preserved. Never replay it or create another grant without explicit authorization.
+
+## Recorded-result replay and data rights
+
+On `/live`, “Replay of previously retrieved real API results” identifies the real seed, retrieval time and limits. “Show recorded results” reads the ten previously validated public movie names/IDs from `/api/verified-sample`; it never invokes the ledger or Qloo. Replaying it again reads the same observation. The invented three-person comparison remains separate and does not personalize these ten results.
+
+Only minimal public movie facts and provenance are retained, with no images, descriptions, personal data or credentials. Qloo's event [access guide](https://github.com/qloo/qloo-hackathon-kit/blob/main/docs/API_ACCESS.md) advises caching only needed data; its [safe-use guide](https://github.com/qloo/qloo-hackathon-kit/blob/main/docs/SAFE_USE.md) calls for source and limitations. [Qloo terms](https://www.qloo.com/legal/terms) and any applicable event terms remain in effect. MIT licenses this project's code; it grants no additional rights to Qloo data, marks or third-party content. This narrow replay does not guarantee contest eligibility.

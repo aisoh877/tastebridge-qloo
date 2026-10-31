@@ -1,4 +1,4 @@
-import {fixtureProvider,seedOptions} from './fixtures.mjs';
+import {fixtureProvider,seedOptions,verifiedQlooSample} from './fixtures.mjs';
 import {findAgreement} from './ranking.mjs';
 import {toolDefinitions} from './tools.mjs';
 import {verifyOperator,operatorReady} from './operator.mjs';
@@ -89,6 +89,7 @@ export default {async fetch(request,env){
       const stub=env.QLOO_BUDGET.get(env.QLOO_BUDGET.idFromName('qloo-lifetime-v1'));
       return stub.fetch(`https://ledger.internal/operator/${action}`,{method:'POST',headers:{'Content-Type':'application/json','X-TasteBridge-Authorization':request.headers.get('X-TasteBridge-Authorization')},body:JSON.stringify(input)});
     }
+    if(request.method==='GET'&&path==='/api/verified-sample')return json(200,verifiedQlooSample);
     if(request.method==='GET'&&path==='/api/options')return json(200,seedOptions);
     if(request.method==='GET'&&path==='/api/live/status')return json(200,status(env));
     if(request.method==='GET'&&path==='/api/live/budget'){

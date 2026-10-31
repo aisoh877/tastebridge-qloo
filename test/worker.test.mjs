@@ -163,4 +163,6 @@ test('bounded response accepts exactly 2MiB and rejects one byte above',async()=
 test('stalled response stream obeys an overall deadline without retry',async()=>{
  let cancelled=false;const body=new ReadableStream({pull(){return new Promise(()=>{})},cancel(){cancelled=true}});
  await assert.rejects(boundedResponse(new Response(body),'fake-only',{deadlineAt:Date.now()+10}),e=>e.validation.stage==='body_timeout');assert.equal(cancelled,true);
+});test('verified replay returns only the ten observed public movies without ledger access',async()=>{
+ const env={QLOO_BUDGET:{idFromName(){throw Error('must not access ledger')}}};const response=await worker.fetch(new Request('https://demo.example/api/verified-sample'),env);assert.equal(response.status,200);const value=await response.json();assert.equal(value.kind,'recorded-worker-response');assert.equal(value.seed.id,movie);assert.equal(value.movies.length,10);assert.equal(value.movies[0].name,'Pulp Fiction');assert.equal(value.jsonValidated,true);assert.match(value.notice,/zero Qloo requests/);assert.deepEqual(Object.keys(value.movies[0]).sort(),['id','name']);
 });
