@@ -1,0 +1,1 @@
+{"name":"tastebridge-worker","version":"0.2.0","private":true,"type":"module","license":"MIT","scripts":{"test":"node --test test/*.test.mjs","check":"node --check src/worker.mjs && node --check public/live.mjs && node --check public/app.mjs","dev":"wrangler dev --local","deploy":"wrangler deploy"},"engines":{"node":">=24.18.0"}}

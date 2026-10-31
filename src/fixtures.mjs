@@ -1,0 +1,4 @@
+const catalog={sea:{name:'The Quiet Harbor',ids:['bridge','orbit','green-room']},space:{name:'Orbit Letters',ids:['orbit','bridge','green-room']},forest:{name:'The Forest Kitchen',ids:['green-room','bridge','orbit']},solo:{name:'A Separate Evening',ids:['solo-result']}};
+const titles={bridge:'Letters Across the Harbor',orbit:'A Small Moon','green-room':'The Green Room','solo-result':'A Different Trail'};
+export const seedOptions=Object.entries(catalog).map(([id,x])=>({id,name:x.name}));
+export function fixtureProvider({fail=false}={}){return {name:'fixture',async recommend(seeds){if(fail)throw new Error('Simulated provider failure. No fallback result.');if(seeds.some(id=>!catalog[id]))throw new Error('Unknown fixture selection.');return [...new Set(seeds.flatMap(id=>catalog[id].ids))].map(id=>({id,name:titles[id]}));}};}
